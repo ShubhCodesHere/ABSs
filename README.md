@@ -18,6 +18,29 @@ AI-powered agents are vulnerable to "Passive-Aggressive" web attacks where a mal
 
 ---
 
+## 🚀 Quick Start
+
+The easiest way to get started is using our interactive launcher:
+
+1.  **Clone the Repository**
+    ```bash
+    git clone https://github.com/ShubhCodesHere/ABSs.git
+    cd ABS
+    ```
+
+2.  **Run the Easy Launcher**
+    ```bash
+    python run.py
+    ```
+
+   This menu will help you:
+   *   📦 Install dependencies automatically.
+   *   ☠️ Start the Simulation Attack Server.
+   *   📊 Launch the Security Dashboard.
+   *   🤖 Run the Secure Agent with default or custom prompts.
+
+---
+
 ## 🏗️ Architecture & Challenge Alignment
 
 The system wraps the standard `browser-use` Agent with three defensive layers, directly mapping to the challenge objectives:
@@ -47,7 +70,9 @@ The system wraps the standard `browser-use` Agent with three defensive layers, d
 
 ---
 
-## 🛠️ Setup & Installation
+## 🛠️ Manual Setup & Installation
+
+If you prefer to run components individually, follow these steps:
 
 ### Prerequisites
 *   Python 3.11+
@@ -78,7 +103,9 @@ The system wraps the standard `browser-use` Agent with three defensive layers, d
 
 ---
 
-## 🎮 Usage
+## 🎮 Manual Usage
+
+If you are not using `run.py`, you can run each component directly:
 
 ### 1. Start the Attack Simulation (The Victim)
 We've included a malicious web server to test the defenses.
