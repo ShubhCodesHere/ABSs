@@ -1,0 +1,10 @@
+browser-use
+openai
+langchain-openai
+python-dotenv
+asyncio
+beautifulsoup4
+streamlit
+flask
+requests
+pydantic
