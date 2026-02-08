@@ -1,6 +1,5 @@
 # 🛡️ SecureAgent: Zero-Trust Defense for Agentic Browsers
 
-[![Hackathon Submission](https://img.shields.io/badge/Status-Hackathon_Submission-blue)]()
 [![Security](https://img.shields.io/badge/Security-Zero_Trust-green)]()
 
 A security framework designed to protect AI Agents from **Prompt Injection, Jailbreaking, and Malicious Web Interactions**.
