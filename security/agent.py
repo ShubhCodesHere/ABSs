@@ -11,6 +11,7 @@ from .config import SecurityConfig
 from .reputation import ReputationManager
 from .event_logger import SecurityLogger
 from .risk_scorer import RiskScorer
+from .policy_engine import PolicyEngine
 
 # Configure logging
 logger = logging.getLogger("security.agent")
@@ -32,6 +33,8 @@ class SecureAgent(Agent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.security_manager = ReputationManager()
+        from pathlib import Path
+        self.policy_engine = PolicyEngine(Path(os.path.dirname(__file__)) / "dashboard")
         self.security_state = "UNKNOWN"
         self.last_evidence_path = None
         self.HONEY_TOKEN = "4000-1234-5678-9010"
@@ -59,8 +62,15 @@ class SecureAgent(Agent):
 
     async def _intercept_network(self, route, request):
         """
-        Network-level security: DLP honey token detection and cross-origin blocking.
+        Network-level security: Policy Enforcement, DLP honey token detection, and cross-origin blocking.
         """
+        # --- Policy Enforcement (Domains) ---
+        if hasattr(self, 'policy_engine') and request.resource_type in ["document", "iframe", "fetch", "xhr"]:
+            if self.policy_engine.check_navigation(request.url):
+                logger.warning(f"🚫 BLOCKED BY ENTERPRISE POLICY: {request.url}")
+                await route.abort()
+                return
+
         # Block risky resource types
         if request.resource_type in ["font", "media"]:
             await route.abort()
@@ -173,6 +183,38 @@ class SecureAgent(Agent):
                         const vulnerabilities = [];
                         const all = document.querySelectorAll('*');
                         all.forEach(el => {
+                            // --- VISUAL TRUTH VALIDATOR (BEATS OCR) ---
+                            // Instantly compute mathematical physics instead of brute-force OCR mapping.
+                            // We strip structurally hidden prompt instructions BEFORE they hit the Agent.
+                            try {
+                                if (el.children.length === 0 && el.textContent.trim().length > 0) {
+                                    const style = window.getComputedStyle(el);
+                                    let rect = el.getBoundingClientRect();
+                                    
+                                    // Math Checks: opacity zero, offscreen, font-size < 1, transparent
+                                    let isHidden = (
+                                        style.opacity === '0' || 
+                                        style.display === 'none' || 
+                                        style.visibility === 'hidden' ||
+                                        parseFloat(style.fontSize) < 1 ||
+                                        rect.left < -999 || rect.top < -999 ||
+                                        (style.color && style.backgroundColor && style.color === style.backgroundColor && style.color !== 'rgba(0, 0, 0, 0)')
+                                    );
+                                    
+                                    if (isHidden && !el.getAttribute('data-visual-truth-purged')) {
+                                        let snippet = el.textContent.trim().substring(0, 40);
+                                        vulnerabilities.push({
+                                            type: 'VISUAL_TRUTH_VIOLATION',
+                                            details: `Stripped invisible prompt injection mathematically: "${snippet}"`,
+                                            risk_score: 95
+                                        });
+                                        el.setAttribute('data-visual-truth-purged', 'true');
+                                        el.remove(); // Nuke the invisible payload natively!
+                                        return; // Skip rest
+                                    }
+                                }
+                            } catch(e) {}
+
                             // DETECTOR 1: Dynamic Injection (MutationObserver Results)
                             if (el.getAttribute('data-sentinel-suspicious') === 'true' && !el.getAttribute('data-sentinel-dynamic-logged')) {
                                 el.setAttribute('data-sentinel-dynamic-logged', 'true');
@@ -298,8 +340,12 @@ class SecureAgent(Agent):
                 self.security_state = "UNKNOWN"
                 is_safe = True  # Don't alert on blank pages
             else:
-                is_safe = self.security_manager.check_reputation(current_url)
-                self.security_state = "TRUSTED" if is_safe else "HOSTILE"
+                if hasattr(self, 'policy_engine') and self.policy_engine.check_navigation(current_url):
+                    self.security_state = "BLOCKED"
+                    is_safe = False
+                else:
+                    is_safe = self.security_manager.check_reputation(current_url)
+                    self.security_state = "TRUSTED" if is_safe else "HOSTILE"
 
             # Log state changes
             threats_found = js_threats and len(js_threats) > 0
@@ -389,6 +435,13 @@ class SecureAgent(Agent):
         Modifies the summary to hide/redact dangerous content.
         Applies to ALL pages, not just hostile ones.
         """
+        if self.security_state == "BLOCKED":
+            if hasattr(summary, 'dom_state'):
+                def block_representation(*args, **kwargs):
+                    return "[CRITICAL ALERT] NAVIGATION ABORTED. DOMAIN IS BLOCKED BY ENTERPRISE POLICY. DO NOT PROCEED."
+                summary.dom_state.llm_representation = block_representation
+            return
+
         if hasattr(summary, 'dom_state'):
             original_llm_rep = summary.dom_state.llm_representation
 
@@ -441,44 +494,47 @@ class SecureAgent(Agent):
     #  LAYER 2: ACTION SENTINEL (Risk-Scored Action Mediation)
     # =====================================================================
 
-    async def _execute_actions(self):
+    async def multi_act(self, actions: list) -> list:
         """
         Intercepts and validates all agent actions before execution.
         Uses dynamic risk scoring for each action.
         """
-        if self.state.last_model_output and self.state.last_model_output.action:
-            approved_actions = []
-            blocked_count = 0
+        approved_actions = []
+        blocked_results = []
+        blocked_count = 0
 
-            for index, action in enumerate(self.state.last_model_output.action):
-                validation_result = self._validate_action_with_risk(action)
-                
-                if validation_result["approved"]:
-                    approved_actions.append(action)
-                    
-                    # Log medium-risk actions for monitoring
-                    if validation_result.get("risk_level") == "MEDIUM":
-                        logger.info(
-                            f"⚠️ Sentinel: Action {index} approved with elevated monitoring "
-                            f"(Risk: {validation_result.get('risk_score', '?')}/100)"
-                        )
-                else:
-                    blocked_count += 1
-                    logger.warning(
-                        f"🛑 Sentinel: BLOCKED action {index} "
-                        f"(Risk: {validation_result.get('risk_score', '?')}/100, "
-                        f"Reason: {validation_result.get('reason', 'policy violation')})"
+        for index, action in enumerate(actions):
+            validation_result = self._validate_action_with_risk(action)
+
+            if validation_result["approved"]:
+                approved_actions.append(action)
+
+                # Log medium-risk actions for monitoring
+                if validation_result.get("risk_level") == "MEDIUM":
+                    logger.info(
+                        f"⚠️ Sentinel: Action {index} approved with elevated monitoring "
+                        f"(Risk: {validation_result.get('risk_score', '?')}/100)"
                     )
+            else:
+                blocked_count += 1
+                logger.warning(
+                    f"🛑 Sentinel: BLOCKED action {index} "
+                    f"(Risk: {validation_result.get('risk_score', '?')}/100, "
+                    f"Reason: {validation_result.get('reason', 'policy violation')})"
+                )
 
-                    # Generate XAI explanation for blocked actions
-                    await self._generate_xai_explanation(action, validation_result)
+                # Generate XAI explanation for blocked actions
+                await self._generate_xai_explanation(action, validation_result)
 
-            if blocked_count > 0:
-                logger.info(f"🛡️ Sentinel: Blocked {blocked_count} dangerous action(s).")
+                from browser_use.agent.views import ActionResult
+                blocked_results.append(ActionResult(error=f"Security Block: {validation_result.get('reason')}"))
 
-            self.state.last_model_output.action = approved_actions
+        if blocked_count > 0:
+            logger.info(f"🛡️ Sentinel: Blocked {blocked_count} dangerous action(s).")
+            if not approved_actions:
+                return blocked_results
 
-        return await super()._execute_actions()
+        return await super().multi_act(approved_actions) + blocked_results
 
     def _validate_action_with_risk(self, action_model) -> dict:
         """
@@ -495,6 +551,38 @@ class SecureAgent(Agent):
                 # Ensure params is a dict
                 if not isinstance(params, dict):
                     params = {}
+
+                # --- Policy Engine Enforcement ---
+                # 1. Blocked Actions
+                if self.policy_engine.check_action(action_name):
+                    return {
+                        "approved": False,
+                        "risk_score": 80,
+                        "risk_level": "HIGH",
+                        "reason": f"Action '{action_name}' is disabled by Enterprise Policy."
+                    }
+
+                # 2. Blocked Domains (Navigation)
+                if action_name in ['go_to_url', 'open_tab', 'navigate', 'go_to']:
+                    nav_url = params.get('url', '')
+                    if nav_url and self.policy_engine.check_navigation(nav_url):
+                        return {
+                            "approved": False,
+                            "risk_score": 95,
+                            "risk_level": "CRITICAL",
+                            "reason": f"Navigation to '{nav_url}' is blocked by Enterprise Policy."
+                        }
+
+                # 3. Blocked Input Patterns
+                if action_name == 'input_text':
+                    input_val = params.get('text', '')
+                    if input_val and self.policy_engine.check_input(input_val):
+                        return {
+                            "approved": False,
+                            "risk_score": 85,
+                            "risk_level": "HIGH",
+                            "reason": f"Input matches a pattern restricted by Enterprise Policy."
+                        }
 
                 # --- Hard Policy Checks (always enforced regardless of risk score) ---
                 

@@ -48,10 +48,20 @@ class PolicyEngine:
         self.reload_policies()
         try:
             domain = urllib.parse.urlparse(url).netloc.lower()
-            for blocked in self.policies.get("block_domains", []):
-                # Wildcard matching
-                pattern = blocked.replace(".", "\.").replace("*", ".*")
-                if re.search(f"^{pattern}$", domain):
+            for blocked_raw in self.policies.get("block_domains", []):
+                blocked = blocked_raw.lower()
+                is_match = False
+                
+                # Check exact match or subdomain (e.g. 'youtube.com' covers 'www.youtube.com')
+                if domain == blocked or domain.endswith("." + blocked):
+                    is_match = True
+                else:
+                    # Wildcard matching (e.g. '*.ru')
+                    pattern = blocked.replace(".", "\.").replace("*", ".*")
+                    if re.search(f"^{pattern}$", domain):
+                        is_match = True
+
+                if is_match:
                     self.logger.log_event(
                         event_type="POLICY_VIOLATION",
                         risk_level="CRITICAL",
